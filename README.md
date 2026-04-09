@@ -15,10 +15,7 @@ This project is a standalone WebGL implementation using Three.js and custom GLSL
 
 ## Demonstration
 
-<video width="100%" autoplay loop muted playsinline>
-  <source src="Particles.mp4" type="video/mp4">
-  <p>Your browser does not support the video tag. You can download the video <a href="Particles.mp4">here</a>.</p>
-</video>
+https://github.com/Berlindraft/LetItBreathe/raw/main/Particles.mp4
 
 ## Usage
 
