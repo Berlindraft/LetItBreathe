@@ -15,7 +15,7 @@ This project is a standalone WebGL implementation using Three.js and custom GLSL
 
 ## Demonstration
 
-https://github.com/Berlindraft/LetItBreathe/raw/main/Particles.mp4
+<video src="https://raw.githubusercontent.com/Berlindraft/LetItBreathe/main/Particles.mp4" autoplay loop muted playsinline width="100%"></video>
 
 ## Usage
 
