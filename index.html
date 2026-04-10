@@ -74,8 +74,8 @@
     camera.position.z = 5;
 
     // ═══════════ PARTICLE GRID ═══════════
-    const countX = 100;
-    const countY = 55;
+    const countX = 250;
+    const countY = 140;
     const count = countX * countY;
 
     const geometry = new THREE.PlaneGeometry(1, 1);
@@ -272,8 +272,8 @@
     // Grid offsets + random attributes
     const offsets = new Float32Array(count * 3);
     const randoms = new Float32Array(count);
-    const gridWidth = 40;
-    const gridHeight = 22;
+    const gridWidth = 100;
+    const gridHeight = 56;
     const jitter = 0.25;
 
     let idx = 0;
@@ -308,32 +308,120 @@
     }
     mesh.instanceMatrix.needsUpdate = true;
 
-    // ═══════════ MOUSE TRACKING ═══════════
+    // ═══════════ MULTI-WINDOW SYNC & MOUSE TRACKING ═══════════
+    const bc = new BroadcastChannel('particle-sync');
     let hovering = true;
-    const pointer = { x: 0, y: 0 };
+    const globalPointer = { x: 0, y: 0 };
+    let lastBroadcast = 0;
+
+    let viewportScreenX = 0;
+    let viewportScreenY = 0;
+    let lastWindowScreenX = window.screenX || 0;
+    let lastWindowScreenY = window.screenY || 0;
+
+    function initFallbackOffset() {
+        const outerW = window.outerWidth || window.innerWidth || 1920;
+        const innerW = window.innerWidth || 1920;
+        const borderX = Math.max(0, (outerW - innerW) / 2);
+        
+        const outerH = window.outerHeight || window.innerHeight || 1080;
+        const innerH = window.innerHeight || 1080;
+        const borderY = Math.max(0, outerH - innerH - borderX);
+
+        viewportScreenX = (window.screenX || 0) + borderX;
+        viewportScreenY = (window.screenY || 0) + borderY;
+
+        if (isNaN(viewportScreenX)) viewportScreenX = 0;
+        if (isNaN(viewportScreenY)) viewportScreenY = 0;
+    }
+    initFallbackOffset();
+
+    function updateCameraOffset() {
+        const fullWidth = Math.max(1, window.screen?.width || window.innerWidth);
+        const fullHeight = Math.max(1, window.screen?.height || window.innerHeight);
+
+        const currentScreenX = window.screenX || 0;
+        const currentScreenY = window.screenY || 0;
+
+        const dx = currentScreenX - lastWindowScreenX;
+        const dy = currentScreenY - lastWindowScreenY;
+        
+        if (!isNaN(dx)) viewportScreenX += dx;
+        if (!isNaN(dy)) viewportScreenY += dy;
+        
+        lastWindowScreenX = currentScreenX;
+        lastWindowScreenY = currentScreenY;
+
+        const w = Math.max(1, window.innerWidth);
+        const h = Math.max(1, window.innerHeight);
+
+        if (!isNaN(viewportScreenX) && !isNaN(viewportScreenY)) {
+            camera.setViewOffset(fullWidth, fullHeight, viewportScreenX, viewportScreenY, w, h);
+            camera.updateProjectionMatrix();
+        }
+    }
+
+    updateCameraOffset();
 
     window.addEventListener('pointermove', (e) => {
-        pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-        pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        if (e.screenX != null && e.clientX != null) {
+            viewportScreenX = e.screenX - e.clientX;
+            viewportScreenY = e.screenY - e.clientY;
+        }
+
+        const screenW = window.screen?.width || window.innerWidth;
+        const screenH = window.screen?.height || window.innerHeight;
+
+        const globalScreenX = e.screenX != null ? e.screenX : ((window.screenX || 0) + e.clientX);
+        const globalScreenY = e.screenY != null ? e.screenY : ((window.screenY || 0) + e.clientY);
+
+        const px = (globalScreenX / screenW) * 2 - 1;
+        const py = -(globalScreenY / screenH) * 2 + 1;
+
+        if (!isNaN(px) && !isNaN(py)) {
+            globalPointer.x = px;
+            globalPointer.y = py;
+        }
+        hovering = true;
+
+        const now = performance.now();
+        if (now - lastBroadcast > 16) {
+            bc.postMessage({ type: 'pointer', x: globalPointer.x, y: globalPointer.y });
+            lastBroadcast = now;
+        }
     });
-    document.body.addEventListener('mouseleave', () => { hovering = false; });
+
+    bc.onmessage = (event) => {
+        if (event.data.type === 'pointer' && !isNaN(event.data.x) && !isNaN(event.data.y)) {
+            globalPointer.x = event.data.x;
+            globalPointer.y = event.data.y;
+            hovering = true;
+        } else if (event.data.type === 'leave') {
+            hovering = false;
+        }
+    };
+
+    document.body.addEventListener('mouseleave', () => { 
+        hovering = false; 
+        bc.postMessage({ type: 'leave' }); 
+    });
     document.body.addEventListener('mouseenter', () => { hovering = true; });
 
     // ═══════════ RESIZE ═══════════
     window.addEventListener('resize', () => {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
+        const w = Math.max(1, window.innerWidth);
+        const h = Math.max(1, window.innerHeight);
         camera.aspect = w / h;
-        camera.updateProjectionMatrix();
+        updateCameraOffset();
         renderer.setSize(w, h);
         uniforms.uResolution.value.set(w, h);
     });
 
     // ═══════════ VIEWPORT HELPER ═══════════
-    function getViewportSize() {
+    function getGlobalViewportSize() {
         const vFOV = (camera.fov * Math.PI) / 180;
         const height = 2 * Math.tan(vFOV / 2) * camera.position.z;
-        const width = height * camera.aspect;
+        const width = height * (window.screen.width / window.screen.height);
         return { width, height };
     }
 
@@ -343,19 +431,20 @@
     function animate() {
         requestAnimationFrame(animate);
 
+        updateCameraOffset(); // Sync sub-viewport per frame
+
         const elapsed = clock.getElapsedTime();
         uniforms.uTime.value = elapsed;
 
-        // Smooth cursor following
-        const viewport = getViewportSize();
+        const viewport = getGlobalViewportSize();
 
         if (hovering) {
             const jitterRadius = Math.min(viewport.width, viewport.height) * CONFIG.cursor.radius;
             const jitterX = (Math.sin(elapsed * 0.35) + Math.sin(elapsed * 0.77 + 1.2)) * 0.5;
             const jitterY = (Math.cos(elapsed * 0.31) + Math.sin(elapsed * 0.63 + 2.4)) * 0.5;
 
-            const targetX = (pointer.x * viewport.width / 2) + jitterX * jitterRadius * CONFIG.cursor.strength;
-            const targetY = (pointer.y * viewport.height / 2) + jitterY * jitterRadius * CONFIG.cursor.strength;
+            const targetX = (globalPointer.x * viewport.width / 2) + jitterX * jitterRadius * CONFIG.cursor.strength;
+            const targetY = (globalPointer.y * viewport.height / 2) + jitterY * jitterRadius * CONFIG.cursor.strength;
 
             uniforms.uMouse.value.x += (targetX - uniforms.uMouse.value.x) * CONFIG.cursor.dragFactor;
             uniforms.uMouse.value.y += (targetY - uniforms.uMouse.value.y) * CONFIG.cursor.dragFactor;
